@@ -1,5 +1,5 @@
 (ns query-txn-hbase.query
-  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key scan]]
+  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key results->map scan]]
             [clojure.data.csv :as csv]
             [clojure.java.io :as io])
   (:import org.apache.hadoop.hbase.HBaseConfiguration
