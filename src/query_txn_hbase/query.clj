@@ -1,11 +1,12 @@
 (ns query-txn-hbase.query
-  (:require [cbass :refer [find-by scan new-connection pack-un-pack]]
-            [taoensso.nippy :as nippy])
-  (:import org.apache.hadoop.conf.Configuration
-           [org.apache.hadoop.hbase.client Get HConnection HTableInterface Put Result Scan]
-           org.apache.hadoop.hbase.HBaseConfiguration
-           org.apache.hadoop.hbase.util.Bytes
-           org.apache.hadoop.hbase.client.HTable))
+  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key scan]]
+            [clojure.data.csv :as csv]
+            [clojure.java.io :as io])
+  (:import org.apache.hadoop.hbase.HBaseConfiguration
+           [org.apache.hadoop.hbase.client Get HTable Put Scan Result]
+           org.apache.hadoop.hbase.filter.ColumnPrefixFilter
+           org.apache.hadoop.hbase.util.Bytes))
+
 
 (defn unpack
   [b]
@@ -16,7 +17,19 @@
   (Bytes/toBytes x))
 
 ;; replace pack-un-pack serialisation with mine
-(pack-un-pack {:p pack :u unpack})
+(pack-un-pack {:p identity :u unpack})
+
+(defn ts-result-value [kv]
+  (let [[ts val] (first (val kv))]
+    [ts (unpack val)]))
+
+(defn hdata->version-map [^Result data]
+  (when-let [r (.getRow data)]
+    (into {} (for [kv (-> (.getMap data) vals first)]
+               (if-some [v (ts-result-value kv)]
+                 [(String. (key kv)) v])))))
+
+
 
 (def conn (new-connection {}))
 
@@ -67,35 +80,78 @@
         (dorun (map add-col columns))))
     (.put table put)))
 
+(defn- update-values [m f & args]
+  (reduce (fn [r [k v]] (assoc r k (apply f v args))) {} m))
+
+(defn- scan-timestamp-rows
+  "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
+  []
+  (let [filter (ColumnPrefixFilter. (Bytes/toBytes "MSG_TIMESTAMP"))
+        scan (doto (Scan.) (.setFilter filter))
+        scanner (.getScanner txn-table scan)
+        results (iterator-seq (.iterator scanner))]
+    (with-redefs [cbass/hdata->map hdata->version-map]
+     (results->map results #(String. %)))))
+
+(defn- key->seqnum
+  "Extracst the seqnum from the key (column name) and returns the seqnum as a String."
+  [k]
+  (second (re-find #"MSG_TIMESTAMP-([0-9]*)" k)))
 
 (defn scan-timestamps
-  "Scan account-txns for timestamps"
+  "Scan account-txns for timestamps returning a sequence of tuples of [seqnum [hbase-timestamp message-timestamp]]"
   []
-  (scan conn "account-txns" :starts-with "test" :columns #{"test1"}))
+  (let [row-values (map (fn [[k v]] v) (scan-timestamp-rows))]
+    (map (fn [m] (for [[k v] m] (flatten [(key->seqnum k) v]))) row-values)))
+
+(defn write-seqnum-ts-msgtimestamp
+  [out-file timestamp-seq]
+  (csv/write-csv out-file timestamp-seq))
+
 
 
 (comment
 
-  (doseq [row (scan-timestamps)]
+
+
+  (dorun (map write-seqnum-ts-msgtimestamp (scan-timestamps)))
+
+
+  (re-find (re-matcher  #"MSG_TIMESTAMP-([0-9]*)" "MSG_TIMESTAMP-123"))
+
+  (type (scan-timestamp-rows))
+  (scan-timestamps)
+
+  (scan-timestamp-rows)
+
+  (map type {"MSG_TIMESTAMP-123" [1447840632278 1234], "MSG_TIMESTAMP-124" [1447840632278 1235], "MSG_TIMESTAMP-125" [1447840632278 1236]})
+
+  (doseq [row (scan-timestamp-rows)]
     (let [key (first row)]
       (println "key=" key "cols=" (second row))))
 
-  (Bytes/to (:test2 (find-by conn "account-txns" "testrow3")))
+  (find-by conn "account-txns" "testrow4")
 
-  (scan-timestamps txn-table)
-  (->
-   (find-by conn "account-txns" "testrow4" "statement_data" #{"test2"})
-   :test2
-   bytes
-   (Bytes/toLong))
+  (store conn "account-txns" "testrow5" "statement_data" {:MSG_TIMESTAMP-123 (Bytes/toBytes 1234) :MSG_TIMESTAMP-124 (Bytes/toBytes 1235) :MSG_TIMESTAMP-125 (Bytes/toBytes 1236)})
+
+  (map associative? (map (fn [[k v]] v) (scan-timestamps)))
+
+
+  (reduce (fn [m e] (assoc m "dummy")) (map (fn [[k v]] v) (scan-timestamps)))
+
 
   (query-txn txn-table "testrow3" "statement_data" "test2")
-  (let [value 1234567]
-    (put-txn txn-table "testrow4" [{:column-family "statement_data" :columns [                                                                             {:column "test2" :value value}]}]))
+
+  (defn update-values [m f & args]
+    (reduce (fn [r [k v]] (assoc r k (apply f v args))) {} m))
+
+  (update-values {:a 1 :b 2 :c 3} #(Bytes/toBytes %))
+
+  (map (fn [m] (update-values m #(Bytes/toLong %))) (map (fn [[k v]] v) (scan-timestamp-rows)))
+
+
 
 
   (Bytes/toLong (Bytes/toBytes (.longValue (java.lang.Long. 12345))))
 
-  (type 1234567)
-
-  )
+  (type 1234567))
