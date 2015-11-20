@@ -10,6 +10,7 @@
                   :exclusions [[org.slf4j/slf4j-log4j12]]]
                  [org.apache.hbase/hbase-client "1.1.1.2.3.0.0-2557"
                   :exclusions [[org.slf4j/slf4j-log4j12]]]]
+  :jvm-opts ["-Xms768m" "-Xmx768m"]
   :resource-paths ["resources"]
   :main ^:skip-aot query-txn-hbase.core
   :target-path "target/%s"

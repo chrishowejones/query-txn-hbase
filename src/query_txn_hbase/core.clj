@@ -15,5 +15,6 @@
   "I don't do a whole lot ... yet."
   [& args]
   (println "*** Start of job ***")
-  (write-timestamps)
+  (time
+   (write-timestamps))
   (println "********************"))
