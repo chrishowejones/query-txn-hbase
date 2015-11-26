@@ -28,11 +28,9 @@
                (if-some [v (ts-result-value kv)]
                  [(String. (key kv)) v])))))
 
-(def conn (new-connection {}))
-
 (defn- scan-timestamp-rows
   "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
-  []
+  [conn]
   (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
     (with-redefs [cbass/hdata->map hdata->version-map]
       (scan conn "account-txns" :filter filter))))
@@ -44,26 +42,27 @@
 
 (defn scan-timestamps
   "Scan account-txns for timestamps returning a sequence of tuples of [seqnum [hbase-timestamp message-timestamp]]"
-  []
-  (let [row-values (map (fn [[k v]] v) (scan-timestamp-rows))]
+  [conn]
+  (let [row-values (map (fn [[k v]] v) (scan-timestamp-rows conn))]
     (map (fn [m] (for [[k v] m] (flatten [(key->seqnum k) v]))) row-values)))
 
 (defn write-seqnum-ts-msgtimestamp
   [out-file timestamp-seq]
   (csv/write-csv out-file timestamp-seq))
 
-
-
 (comment
 
-  (dorun (map write-seqnum-ts-msgtimestamp (scan-timestamps)))
 
+  (with-open [out-file (io/writer "out-file.csv")]
+    (doseq [row-timestamps (scan-timestamps)]
+      (write-seqnum-ts-msgtimestamp out-file row-timestamps)))
 
   (scan-timestamps)
   (scan-timestamp-rows)
 
   (find-by conn "account-txns" "testrow4")
 
-  (store conn "account-txns" "testrow5" "statement_data" {:MSG_TIMESTAMP-123 (Bytes/toBytes 1234) :MSG_TIMESTAMP-124 (Bytes/toBytes 1235) :MSG_TIMESTAMP-125 (Bytes/toBytes 1236)})
+  (let [time (System/currentTimeMillis)]
+   (store conn "account-txns" "testrow4" "s" {:MSG_TIMESTAMP-123 (Bytes/toBytes time) :MSG_TIMESTAMP-124 (Bytes/toBytes time) :MSG_TIMESTAMP-125 (Bytes/toBytes time)}))
 
-)
+  )
