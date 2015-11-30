@@ -27,7 +27,7 @@
 
 (defn- read-config
   [file]
-  (read-string (slurp (io/file (io/resource file)))))
+  (read-string (slurp (io/resource file))))
 
 (def ^:private hbase-config (if-let [conf (env :hbase-config)]
                     conf
