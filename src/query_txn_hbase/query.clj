@@ -118,56 +118,11 @@
 
 (comment
 
-  (re-find #"MSG_TIMESTAMP[_|A-Z]*-([0-9]*)" "MSG_TIMESTAMP_STORM-123")
-
-  (with-open [out-file (io/writer "out-file.csv")]
-    (doseq [row-timestamps (scan-timestamps)]
-      (write-seqnum-ts-msgtimestamp out-file row-timestamps)))
-
-  (map second (scan-timestamp-rows query-txn-hbase.core/conn))
-
-  (map (fn [[k v]] v) (scan-timestamp-rows query-txn-hbase.core/conn))
-
-  (let [row-values (map second (scan-timestamp-rows query-txn-hbase.core/conn))]
-    (group-row-ts-by-seqnum row-values))
-
-  (defn- column->seqnum2
-  "Map across a rows worth of columns and return a sequence of vectors of timestamps with the sequence numbers extracted"
-  [row]
-  row)
-
-  (let [row-values (map second (scan-timestamp-rows query-txn-hbase.core/conn))]
-    (map merge-timestamps-by-seqnum row-values))
-
-  (let [rows (map second (scan-timestamp-rows query-txn-hbase.core/conn))
-        seq-num-map (fn [row] (map (fn [[k v]] {(key->seqnum k) {(column-type k) v}}) row))
-        merge-seq-num-maps (fn [row] (apply merge-with merge (seq-num-map row)))]
-    (map merge-seq-num-maps rows))
-
-  (def one-row
-    {"123"
-     [["123" :msg-timestamp [1448973012159 1448973013490]]
-      ["123" :storm-timestamp [1448973013159 1448973013490]]],
-     "124"
-     [["124" :msg-timestamp [1448973012159 1448973013490]]
-      ["124" :storm-timestamp [1448973013159 1448973013490]]],
-     "125"
-     [["125" :msg-timestamp [1448973012159 1448973013490]]
-      ["125" :storm-timestamp [1448973013159 1448973013490]]]})
-
-  (map (fn [[k v]]
-         (map v))
-       one-row)
-
   (scan-timestamp-rows query-txn-hbase.core/conn)
   (scan-timestamps query-txn-hbase.core/conn)
 
-  (find-by conn "account-txns" "testrow4")
-
-  (let [time (System/currentTimeMillis)
+  (let [time (- (System/currentTimeMillis) 1000)
         second-time (+ 1000 time)]
-    (store query-txn-hbase.core/conn "account-txns" "testrow5" "s" {:MSG_TIMESTAMP-101 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-101 (Bytes/toBytes second-time) :MSG_TIMESTAMP-102 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-102 (Bytes/toBytes second-time) :MSG_TIMESTAMP-103 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-103 (Bytes/toBytes second-time)}))
-
-  (println "String")
+    (store query-txn-hbase.core/conn "account-txns" "testrow4" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
 
   )
