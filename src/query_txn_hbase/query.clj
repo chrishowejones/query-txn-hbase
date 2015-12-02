@@ -43,9 +43,10 @@
 (defn- column-type
   "Return a keyword with the column type (either :msg-timestamp or :storm-timestamp"
   [k]
-  (if (re-find #".*STORM.*" k)
-    :storm-timestamp
-    :msg-timestamp))
+  (case (second (re-find #".*(STORM.*-).*" k))
+    "STORM-"      :storm-timestamp
+    "STORMHBASE-" :stormhbase-timestamp
+    nil           :msg-timestamp))
 
 (defn- column-timestamps->seqnum-type-timestamp-map
   "Take a map with an entry per column name and a vector of timestamp and hbase timestamp and
@@ -97,8 +98,9 @@
   (let [seqnum          (first seqnum-ts-map)
         timestamp-map   (-> seqnum-ts-map second)
         hbase-timestamp (-> timestamp-map first second second)
-        {:keys [msg-timestamp storm-timestamp]} timestamp-map]
-    [seqnum (first msg-timestamp) (first storm-timestamp) hbase-timestamp]))
+        {:keys [msg-timestamp storm-timestamp stormhbase-timestamp]
+         :or {storm-timestamp [0] stormhbase-timestamp [0]}} timestamp-map]
+    [seqnum (first msg-timestamp) (first storm-timestamp) (first stormhbase-timestamp) hbase-timestamp]))
 
 (defn row-to-seqnum-ts
   "Take a row from HBase and extract the seqnum and the msg, storm and hbase timestamps and return them in a vector."
@@ -123,6 +125,6 @@
 
   (let [time (- (System/currentTimeMillis) 1000)
         second-time (+ 1000 time)]
-    (store query-txn-hbase.core/conn "account-txns" "testrow4" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
+    (store query-txn-hbase.core/conn "account-txns" "testrow2" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
 
   )
