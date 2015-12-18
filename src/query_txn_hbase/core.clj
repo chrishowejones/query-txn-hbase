@@ -33,7 +33,7 @@
                     conf
                     (:hbase-config (read-config "config.edn"))))
 
-(def ^:private conn (new-connection (into {}
+(def conn (new-connection (into {}
                                 (map (fn [[k v]] [(name k) v]) hbase-config))))
 
 (defn- write-timestamps
