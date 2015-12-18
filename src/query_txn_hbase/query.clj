@@ -1,7 +1,8 @@
 (ns query-txn-hbase.query
   (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key results->map scan]]
             [clojure.data.csv :as csv]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import org.apache.hadoop.hbase.HBaseConfiguration
            [org.apache.hadoop.hbase.client Get HTable Put Scan Result]
            org.apache.hadoop.hbase.filter.ColumnPrefixFilter
@@ -116,7 +117,8 @@
 
 (defn write-seqnum-ts-msgtimestamp
   [out-file timestamp-seq]
-  (csv/write-csv out-file timestamp-seq))
+  (let [line (str/join timestamp-seq ",")]
+    (.write out-file line)))
 
 (comment
 
@@ -126,5 +128,18 @@
   (let [time (- (System/currentTimeMillis) 1000)
         second-time (+ 1000 time)]
     (store query-txn-hbase.core/conn "account-txns" "testrow2" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
+
+  ;; Query to count the number of messages in the account-txns table.
+  (defn count-txns []
+    (let [filter (org.apache.hadoop.hbase.filter.ColumnPrefixFilter. (.getBytes "SEQNUM"))]
+      (reduce (fn [cnt x] (+ (-> x second keys count) cnt)) 0
+              (cbass/scan query-txn-hbase.core/conn "account-txns" :filter filter))))
+
+
+  ;; Query to count the number of rows with more that one seqnum col in the account-txns table.
+  (defn txns-gt-1-seqnum []
+    (let [filter (org.apache.hadoop.hbase.filter.ColumnPrefixFilter. (.getBytes "SEQNUM"))]
+      (reduce (fn [cnt x] (+ (if (< 1 (-> x second keys count))) cnt)) 0
+              (cbass/scan query-txn-hbase.core/conn "account-txns" :filter filter))))
 
   )
