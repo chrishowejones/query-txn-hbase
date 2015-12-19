@@ -1,10 +1,11 @@
 (ns query-txn-hbase.query
-  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key results->map scan]]
+  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key results->map scan get-table without-ts]]
+            [cbass.scan :refer [scan-filter]]
             [clojure.data.csv :as csv]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import org.apache.hadoop.hbase.HBaseConfiguration
-           [org.apache.hadoop.hbase.client Get HTable Put Scan Result]
+           [org.apache.hadoop.hbase.client Get HTable HTableInterface Put Scan Result]
            org.apache.hadoop.hbase.filter.ColumnPrefixFilter
            org.apache.hadoop.hbase.util.Bytes))
 
@@ -28,6 +29,27 @@
     (into {} (for [kv (-> (.getMap data) vals first)]
                (if-some [v (ts-result-value kv)]
                  [(String. (key kv)) v])))))
+
+
+(defn iter->map [iter row-key-fn]
+  (let [r (.next iter)]
+    [(row-key-fn (.getRow r))
+     (hdata->version-map r)]))
+
+(defn my-scan [conn table row-fn & {:keys [row-key-fn limit with-ts] :as criteria}]
+  (with-open [^HTableInterface h-table (get-table conn table)]
+    (let [iter (.iterator (.getScanner h-table (scan-filter criteria)))]
+      (loop []
+       (when (.hasNext iter)
+         (let [row (iter->map iter #(String. %))]
+            (row-fn row)
+            (recur)))))))
+
+(defn- my-scan-timestamp-rows
+  "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
+  [conn row-fn]
+  (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
+    (my-scan conn "account-txns" row-fn  :filter filter)))
 
 (defn- scan-timestamp-rows
   "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
@@ -108,6 +130,15 @@
   [row]
   (map extract-seqnum-and-timestamps (merge-timestamps-by-seqnum row)))
 
+(defn print-row [row]
+  (let [row-values (second row)]
+    (println (row-to-seqnum-ts row-values))))
+
+(defn write-row [out-file]
+  (fn [row]
+    (let [row-values (second row)
+          seqnum-ts  (row-to-seqnum-ts row-values)]
+      (csv/write-csv out-file seqnum-ts))))
 
 (defn scan-timestamps
   "Scan account-txns for timestamps returning a sequence of tuples of [seqnum [hbase-timestamp message-timestamp]]"
@@ -115,19 +146,45 @@
   (let [row-values (map second (scan-timestamp-rows conn))]
     (map row-to-seqnum-ts row-values)))
 
+
 (defn write-seqnum-ts-msgtimestamp
   [out-file timestamp-seq]
   (let [line (str/join timestamp-seq ",")]
     (.write out-file line)))
 
+(defn write-seqnum-ts-msgtimestamp-lazy
+  [out-file conn]
+  (my-scan-timestamp-rows conn (write-row out-file)))
+
 (comment
 
+  (with-open [out-file (io/writer "test-out.csv")]
+   (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
+
+  ([201 1450514635364 1450514636364 0 1450514902245]
+   [202 1450514635364 1450514636364 0 1450514902245]
+   [203 1450514635364 1450514636364 0 1450514902245])
+  ([201 1450463228799 1450463229799 0 1450463230052]
+   [202 1450463228799 1450463229799 0 1450463230052]
+   [203 1450463228799 1450463229799 0 1450463230052])
+
+
+
   (scan-timestamp-rows query-txn-hbase.core/conn)
+
   (scan-timestamps query-txn-hbase.core/conn)
+
+  ((["201" 1450514635364 1450514636364 0 1450514902245]
+    ["202" 1450514635364 1450514636364 0 1450514902245]
+    ["203" 1450514635364 1450514636364 0 1450514902245])
+   (["201" 1450463228799 1450463229799 0 1450463230052]
+    ["202" 1450463228799 1450463229799 0 1450463230052]
+    ["203" 1450463228799 1450463229799 0 1450463230052]))
+
 
   (let [time (- (System/currentTimeMillis) 1000)
         second-time (+ 1000 time)]
-    (store query-txn-hbase.core/conn "account-txns" "testrow2" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
+    (store query-txn-hbase.core/conn "account-txns" "testrow1" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
 
   ;; Query to count the number of messages in the account-txns table.
   (defn count-txns []

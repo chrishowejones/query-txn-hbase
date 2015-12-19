@@ -5,7 +5,7 @@
             [environ.core :refer [env]]
             [query-txn-hbase.query
              :refer
-             [scan-timestamps write-seqnum-ts-msgtimestamp]])
+             [scan-timestamps write-seqnum-ts-msgtimestamp write-seqnum-ts-msgtimestamp-lazy]])
   (:gen-class))
 
 (def ^:private cli-options
@@ -42,11 +42,16 @@
     (doseq [row-timestamps (scan-timestamps conn)]
       (write-seqnum-ts-msgtimestamp out-file row-timestamps))))
 
+(defn- write-timestamps-lazy
+  [file]
+  (with-open [out-file (io/writer file)]
+    (write-seqnum-ts-msgtimestamp-lazy out-file conn)))
+
 (defn- run-main
   [file]
   (println "*** Start of job ***")
   (time
-   (write-timestamps file))
+   (write-timestamps-lazy file))
   (println "********************"))
 
 (defn -main
