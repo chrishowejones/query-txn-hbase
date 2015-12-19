@@ -51,7 +51,7 @@
   [file]
   (println "*** Start of job ***")
   (time
-   (write-timestamps-lazy file))
+   (write-timestamps file))
   (println "********************"))
 
 (defn -main

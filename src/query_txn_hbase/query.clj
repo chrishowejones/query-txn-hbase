@@ -30,6 +30,14 @@
                (if-some [v (ts-result-value kv)]
                  [(String. (key kv)) v])))))
 
+(defn results->version-map [results row-key-fn]
+  (for [r results]
+    [(row-key-fn (.getRow r))
+     (hdata->version-map r)]))
+
+(defn without-ts-seq [results]
+  (for [[k v] results]
+    [k (dissoc v :last-updated)]))
 
 (defn iter->map [iter row-key-fn]
   (let [r (.next iter)]
@@ -55,7 +63,8 @@
   "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
   [conn]
   (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
-    (with-redefs [cbass/hdata->map hdata->version-map]
+    (with-redefs [cbass/results->map results->version-map
+                  cbass/without-ts without-ts-seq]
       (scan conn "account-txns" :filter filter))))
 
 (defn- key->seqnum
@@ -149,8 +158,7 @@
 
 (defn write-seqnum-ts-msgtimestamp
   [out-file timestamp-seq]
-  (let [line (str/join timestamp-seq ",")]
-    (.write out-file line)))
+  (csv/write-csv out-file timestamp-seq))
 
 (defn write-seqnum-ts-msgtimestamp-lazy
   [out-file conn]
@@ -159,28 +167,15 @@
 (comment
 
   (with-open [out-file (io/writer "test-out.csv")]
-   (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
+    (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
 
-  ([201 1450514635364 1450514636364 0 1450514902245]
-   [202 1450514635364 1450514636364 0 1450514902245]
-   [203 1450514635364 1450514636364 0 1450514902245])
-  ([201 1450463228799 1450463229799 0 1450463230052]
-   [202 1450463228799 1450463229799 0 1450463230052]
-   [203 1450463228799 1450463229799 0 1450463230052])
+  (scan query-txn-hbase.core/conn "account-txns" :with-ts true)
 
-
+  (cbass/seq-scan query-txn-hbase.core/conn "account-txns")
 
   (scan-timestamp-rows query-txn-hbase.core/conn)
 
   (scan-timestamps query-txn-hbase.core/conn)
-
-  ((["201" 1450514635364 1450514636364 0 1450514902245]
-    ["202" 1450514635364 1450514636364 0 1450514902245]
-    ["203" 1450514635364 1450514636364 0 1450514902245])
-   (["201" 1450463228799 1450463229799 0 1450463230052]
-    ["202" 1450463228799 1450463229799 0 1450463230052]
-    ["203" 1450463228799 1450463229799 0 1450463230052]))
-
 
   (let [time (- (System/currentTimeMillis) 1000)
         second-time (+ 1000 time)]
