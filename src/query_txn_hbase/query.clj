@@ -177,12 +177,23 @@
   (let [filters (map regex-filter regex-seq)]
     (map #(delete-by conn "account-txns" :filter %) filters)))
 
+(def regex-fn
+  (fn [month] (str "[0-9]+-" month "-.*")))
+
+(defn delete-months
+  [conn months]
+  (let [months-seq (str/split months #",")
+        reqex-seq  (map regex-fn months-seq)]
+    (delete-by-regex conn reqex-seq)))
+
 (comment
 
   (with-open [out-file (io/writer "test-out.csv")]
     (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
 
   (delete-by-regex query-txn-hbase.core/conn ["[0-9]-2015-10-.*"])
+
+  (delete-months query-txn-hbase.core/conn "2015-10,2015-09")
 
   (scan query-txn-hbase.core/conn "account-txns" :with-ts true)
 

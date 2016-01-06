@@ -1,12 +1,12 @@
 (ns query-txn-hbase.core
+  (:gen-class)
   (:require [cbass :refer [new-connection]]
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]
             [environ.core :refer [env]]
             [query-txn-hbase.query
              :refer
-             [scan-timestamps write-seqnum-ts-msgtimestamp write-seqnum-ts-msgtimestamp-lazy]])
-  (:gen-class))
+             [delete-months scan-timestamps write-seqnum-ts-msgtimestamp]]))
 
 (def ^:private cli-options
   ;; the options for this app
@@ -63,6 +63,8 @@
     (cond
       errors (display-errors errors)
       help   (display-help summary)
-      delete (println "Delete data range" delete)
+      delete (do
+               (println "Delete data range" delete)
+               (delete-months conn delete))
       file   (when-let [{:keys [file]} options]
                (run-main file)))))
