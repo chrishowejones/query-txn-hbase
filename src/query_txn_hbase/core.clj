@@ -11,6 +11,7 @@
 (def ^:private cli-options
   ;; the options for this app
   [["-f" "--file FILE" "Output filepath." :default "out-file.csv"]
+   ["-d" "--delete DATERANGE" "Dateprintln \" range to be deleted" :default :all]
    ["-h" "--help" "Display help."]])
 
 (defn- display-help
@@ -57,9 +58,11 @@
 (defn -main
   "Run query to extract timestamps. Takes output file as an argument."
   [& args]
-  (let [{:keys [options summary errors]} (parse-opts args cli-options)]
+  (let [{:keys [options summary errors]} (parse-opts args cli-options)
+        {:keys [file help delete]} options]
     (cond
-      errors          (display-errors errors)
-      (:help options) (display-help summary)
-      :else           (when-let [{:keys [file]} options]
-                        (run-main file)))))
+      errors (display-errors errors)
+      help   (display-help summary)
+      delete (println "Delete data range" delete)
+      file   (when-let [{:keys [file]} options]
+               (run-main file)))))
