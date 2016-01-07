@@ -65,9 +65,8 @@
   "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
   [conn]
   (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
-    (with-redefs [cbass/hdata->map hdata->version-map
-                  cbass/without-ts without-ts-seq]
-      (scan conn "account-txns" :filter filter :lazy? true))))
+    (with-redefs [hdata->map hdata->version-map]
+      (scan conn "account-txns" :filter filter))))
 
 (defn- key->seqnum
   "Extracst the seqnum from the key (column name) and returns the seqnum as a String."
@@ -175,7 +174,8 @@
 (defn delete-by-regex
   [conn regex-seq]
   (let [filters (map regex-filter regex-seq)]
-    (map #(delete-by conn "account-txns" :filter % :lazy? true) filters)))
+    filters
+    (map #(delete-by conn "account-txns" :filter %) filters)))
 
 (def regex-fn
   (fn [month] (str "[0-9]+-" month "-.*")))
@@ -183,10 +183,12 @@
 (defn delete-months
   [conn months]
   (let [months-seq (str/split months #",")
-        reqex-seq  (map regex-fn months-seq)]
-    (delete-by-regex conn reqex-seq)))
+        regex-seq  (map regex-fn months-seq)]
+    (delete-by-regex conn regex-seq)))
 
 (comment
+  (with-open [out-file (io/writer "test-out2.csv")]
+   (write-seqnum-ts-msgtimestamp-lazy out-file query-txn-hbase.core/conn))
 
   (with-open [out-file (io/writer "test-out.csv")]
     (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
@@ -199,7 +201,7 @@
 
   (cbass/seq-scan query-txn-hbase.core/conn "account-txns")
 
-  (scan-timestamp-rows query-txn-hbase.core/conn)
+  (my-scan-timestamp-rows query-txn-hbase.core/conn println)
 
   (scan-timestamps query-txn-hbase.core/conn)
 

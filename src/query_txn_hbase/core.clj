@@ -4,14 +4,12 @@
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]
             [environ.core :refer [env]]
-            [query-txn-hbase.query
-             :refer
-             [delete-months scan-timestamps write-seqnum-ts-msgtimestamp]]))
+            [query-txn-hbase.query :refer [delete-months scan-timestamps write-seqnum-ts-msgtimestamp]]))
 
 (def ^:private cli-options
   ;; the options for this app
   [["-f" "--file FILE" "Output filepath." :default "out-file.csv"]
-   ["-d" "--delete DATERANGE" "Dateprintln \" range to be deleted" :default :all]
+   ["-d" "--delete DATERANGE" "Dateprintln \" range to be deleted"]
    ["-h" "--help" "Display help."]])
 
 (defn- display-help
@@ -36,17 +34,11 @@
 
 (def conn (new-connection (into {}
                                 (map (fn [[k v]] [(name k) v]) hbase-config))))
-
 (defn- write-timestamps
   [file]
   (with-open [out-file (io/writer file)]
     (doseq [row-timestamps (scan-timestamps conn)]
       (write-seqnum-ts-msgtimestamp out-file row-timestamps))))
-
-(defn- write-timestamps-lazy
-  [file]
-  (with-open [out-file (io/writer file)]
-    (write-seqnum-ts-msgtimestamp-lazy out-file conn)))
 
 (defn- run-main
   [file]
