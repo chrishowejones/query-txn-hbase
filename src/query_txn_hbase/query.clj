@@ -174,8 +174,8 @@
 (defn delete-by-regex
   [conn regex-seq]
   (let [filters (map regex-filter regex-seq)]
-    filters
-    (map #(delete-by conn "account-txns" :filter %) filters)))
+    (doseq [filter filters]
+     (delete-by conn "account-txns" :filter filter))))
 
 (def regex-fn
   (fn [month] (str "[0-9]+-" month "-.*")))

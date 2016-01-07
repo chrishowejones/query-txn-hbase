@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]
             [environ.core :refer [env]]
-            [query-txn-hbase.query :refer [delete-months scan-timestamps write-seqnum-ts-msgtimestamp]]))
+            [query-txn-hbase.query :refer [delete-months scan-timestamps write-seqnum-ts-msgtimestamp-lazy]]))
 
 (def ^:private cli-options
   ;; the options for this app
@@ -38,7 +38,7 @@
   [file]
   (with-open [out-file (io/writer file)]
     (doseq [row-timestamps (scan-timestamps conn)]
-      (write-seqnum-ts-msgtimestamp out-file row-timestamps))))
+      (write-seqnum-ts-msgtimestamp-lazy out-file row-timestamps))))
 
 (defn- run-main
   [file]
@@ -55,7 +55,7 @@
     (cond
       errors (display-errors errors)
       help   (display-help summary)
-      delete (do
+      delete (doall
                (println "Delete data range" delete)
                (delete-months conn delete))
       file   (when-let [{:keys [file]} options]
