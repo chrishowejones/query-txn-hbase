@@ -37,8 +37,7 @@
 (defn- write-timestamps
   [file]
   (with-open [out-file (io/writer file)]
-    (doseq [row-timestamps (scan-timestamps conn)]
-      (write-seqnum-ts-msgtimestamp-lazy out-file row-timestamps))))
+    (write-seqnum-ts-msgtimestamp-lazy out-file conn)))
 
 (defn- run-main
   [file]
