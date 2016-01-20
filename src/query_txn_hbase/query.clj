@@ -1,10 +1,14 @@
 (ns query-txn-hbase.query
-  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key results->map scan]]
+  (:require [cbass :refer [find-by store new-connection pack-un-pack result-value result-key hdata->map scan get-table without-ts delete-by]]
+            [cbass.scan :refer [scan-filter]]
             [clojure.data.csv :as csv]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import org.apache.hadoop.hbase.HBaseConfiguration
-           [org.apache.hadoop.hbase.client Get HTable Put Scan Result]
+           [org.apache.hadoop.hbase.client Get HTable HTableInterface Put Scan Result]
            org.apache.hadoop.hbase.filter.ColumnPrefixFilter
+           org.apache.hadoop.hbase.filter.CompareFilter
+           org.apache.hadoop.hbase.filter.RegexStringComparator
            org.apache.hadoop.hbase.util.Bytes))
 
 (defn unpack
@@ -28,11 +32,40 @@
                (if-some [v (ts-result-value kv)]
                  [(String. (key kv)) v])))))
 
+(defn results->version-map [results row-key-fn]
+  (for [r results]
+    [(row-key-fn (.getRow r))
+     (hdata->version-map r)]))
+
+(defn without-ts-seq [results]
+  (for [[k v] results]
+    [k (dissoc v :last-updated)]))
+
+(defn iter->map [iter row-key-fn]
+  (let [r (.next iter)]
+    [(row-key-fn (.getRow r))
+     (hdata->version-map r)]))
+
+(defn my-scan [conn table row-fn & {:keys [row-key-fn limit with-ts] :as criteria}]
+  (with-open [^HTableInterface h-table (get-table conn table)]
+    (let [iter (.iterator (.getScanner h-table (scan-filter criteria)))]
+      (loop []
+       (when (.hasNext iter)
+         (let [row (iter->map iter #(String. %))]
+            (row-fn row)
+            (recur)))))))
+
+(defn- my-scan-timestamp-rows
+  "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
+  [conn row-fn]
+  (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
+    (my-scan conn "account-txns" row-fn  :filter filter)))
+
 (defn- scan-timestamp-rows
   "Scan account-txns for timestamps returning a map of the results keyed by row key value as a string."
   [conn]
   (let [filter (ColumnPrefixFilter. (.getBytes "MSG_TIMESTAMP"))]
-    (with-redefs [cbass/hdata->map hdata->version-map]
+    (with-redefs [hdata->map hdata->version-map]
       (scan conn "account-txns" :filter filter))))
 
 (defn- key->seqnum
@@ -107,6 +140,15 @@
   [row]
   (map extract-seqnum-and-timestamps (merge-timestamps-by-seqnum row)))
 
+(defn print-row [row]
+  (let [row-values (second row)]
+    (println (row-to-seqnum-ts row-values))))
+
+(defn write-row [out-file]
+  (fn [row]
+    (let [row-values (second row)
+          seqnum-ts  (row-to-seqnum-ts row-values)]
+      (csv/write-csv out-file seqnum-ts))))
 
 (defn scan-timestamps
   "Scan account-txns for timestamps returning a sequence of tuples of [seqnum [hbase-timestamp message-timestamp]]"
@@ -114,17 +156,99 @@
   (let [row-values (map second (scan-timestamp-rows conn))]
     (map row-to-seqnum-ts row-values)))
 
+
 (defn write-seqnum-ts-msgtimestamp
   [out-file timestamp-seq]
   (csv/write-csv out-file timestamp-seq))
 
-(comment
+(defn write-seqnum-ts-msgtimestamp-lazy
+  [out-file conn]
+  (my-scan-timestamp-rows conn (write-row out-file)))
 
-  (scan-timestamp-rows query-txn-hbase.core/conn)
+(defn- regex-filter
+  [regex]
+  (org.apache.hadoop.hbase.filter.RowFilter.
+   (org.apache.hadoop.hbase.filter.CompareFilter$CompareOp/EQUAL)
+   (org.apache.hadoop.hbase.filter.RegexStringComparator. regex)))
+
+(defn delete-by-regex
+  [conn regex-seq]
+  (let [filters (map regex-filter regex-seq)]
+    (doseq [filter filters]
+     (delete-by conn "account-txns" :filter filter))))
+
+(def regex-fn
+  (fn [month] (str "[0-9]+-" month "-.*")))
+
+(defn delete-months
+  [conn months]
+  (let [months-seq (str/split months #",")
+        regex-seq  (map regex-fn months-seq)]
+    (delete-by-regex conn regex-seq)))
+
+(comment
+  (with-open [out-file (io/writer "test-out2.csv")]
+   (write-seqnum-ts-msgtimestamp-lazy out-file query-txn-hbase.core/conn))
+
+  (with-open [out-file (io/writer "test-out.csv")]
+    (my-scan-timestamp-rows query-txn-hbase.core/conn (write-row out-file)))
+
+  (delete-by-regex query-txn-hbase.core/conn ["[0-9]-2015-10-.*"])
+
+  (delete-months query-txn-hbase.core/conn "2015-10,2015-09")
+
+  (scan query-txn-hbase.core/conn "account-txns" :with-ts true)
+
+  (cbass/seq-scan query-txn-hbase.core/conn "account-txns")
+
+  (my-scan-timestamp-rows query-txn-hbase.core/conn println)
+
   (scan-timestamps query-txn-hbase.core/conn)
 
   (let [time (- (System/currentTimeMillis) 1000)
-        second-time (+ 1000 time)]
-    (store query-txn-hbase.core/conn "account-txns" "testrow2" "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)}))
+        second-time (+ 1000 time)
+        account-txn-keys ["1-2015-09-01"
+                          "1-2015-09-30"
+                          "1-2015-10-02"
+                          "1-2015-10-31"
+                          "1-2016-09-30"
+                          "2-2015-10-13"
+                          "100-2015-10-30"
+                          "100-2016-09-30"
+                          "200000-2015-10-02"
+                          "200001-2015-10-02"
+                          "testrow1"]]
+    (map
+     #(store query-txn-hbase.core/conn "account-txns" % "s" {:MSG_TIMESTAMP-201 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-201 (Bytes/toBytes second-time) :MSG_TIMESTAMP-202 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-202 (Bytes/toBytes second-time) :MSG_TIMESTAMP-203 (Bytes/toBytes time) :MSG_TIMESTAMP_STORM-203 (Bytes/toBytes second-time)})
+     account-txn-keys))
+
+  ;; data for:
+  ;;
+  ;; 1-2015-09-01
+  ;; 1-2015-09-30
+  ;; 1-2015-10-02 d
+  ;; 1-2015-10-31 d
+  ;; 1-2016-09-30
+  ;; 2-2015-10-13 d
+  ;; 100-2015-10-30 d
+  ;; 100-2016-09-30
+  ;; 200000-2015-10-02 d
+  ;; 200001-2015-10-02
+  ;; testrow1
+
+  ;; Query to count the number of messages in the account-txns table.
+  (defn count-txns []
+    (let [filter (org.apache.hadoop.hbase.filter.RowFilter.
+                  (.. org.apache.hadoop.hbase.filter.CompareFilter. CompareOp EQUAL)
+                  (org.apache.hadoop.hbase.filter.RegexStringComparator. "[1"))]
+      (reduce (fn [cnt x] (+ (-> x second keys count) cnt)) 0
+              (cbass/scan query-txn-hbase.core/conn "account-txns" :filter filter))))
+
+
+  ;; Query to count the number of rows with more that one seqnum col in the account-txns table.
+  (defn txns-gt-1-seqnum []
+    (let [filter (org.apache.hadoop.hbase.filter.ColumnPrefixFilter. (.getBytes "SEQNUM"))]
+      (reduce (fn [cnt x] (+ (if (< 1 (-> x second keys count))) cnt)) 0
+              (cbass/scan query-txn-hbase.core/conn "account-txns" :filter filter))))
 
   )
